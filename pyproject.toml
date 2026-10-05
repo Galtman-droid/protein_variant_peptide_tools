@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "protein-variant-peptide-tools"
+version = "1.0.0"
+description = "Validate protein substitutions and generate traceable peptide pools from user-defined windows."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = ["openpyxl==3.1.5"]
+
+[project.scripts]
+variant-peptides = "variant_peptide_tools:main"
+
+[tool.setuptools]
+py-modules = ["variant_peptide_tools", "mutant_builder", "peptide_pool_generator"]

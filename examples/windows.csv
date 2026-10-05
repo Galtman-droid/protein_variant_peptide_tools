@@ -1,0 +1,4 @@
+core_id,core_seq,window,window_len,native_window,start
+Group1,CDE,1,5,ACDEF,1
+Group1,CDE,2,5,FGHIK,5
+Group2,MNP,1,5,LMNPQ,10

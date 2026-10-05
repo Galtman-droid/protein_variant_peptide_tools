@@ -1,0 +1,5 @@
+# Artificial substitutions into an alphabetical amino-acid test string.
+CA2A;
+CA2A,KA9A;
+YA20F;
+WT;

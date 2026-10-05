@@ -1,0 +1,231 @@
+---
+title: "Protein variant and peptide tools"
+output:
+  html_document:
+    toc: true
+    toc_depth: 2
+  github_document: default
+---
+
+Validate protein substitutions, build mutant sequences, and generate traceable peptide pools from user-defined sequence windows. Export Excel reports with changed amino acids in red, machine-readable CSV tables, mutant FASTA records, and input checksums.
+
+The repository contains only code and artificial examples. Supply your own reference sequence, chosen mutations, and window definitions.
+
+## What the workflow does
+
+| Step | Input | Result |
+| --- | --- | --- |
+| Build variants | One reference sequence and one mutation combination per line | Validated full-length mutant sequences |
+| Generate pools | Builder CSV or Excel output, the same reference, and window definitions | Peptide-window rows and a summary for every variant |
+| Deduplicate | Changed peptide rows | One catalog entry per distinct amino-acid sequence, linked back to its variants and windows |
+
+This is a **sequence-processing workflow**. It accepts mutation strings using EvoEF2 notation. It does not run EvoEF2, model structures, calculate energies, discover mutations, predict epitopes, assess immunogenicity, or establish biological function. There is no automatic generation of all mutation combinations: each input line specifies one variant.
+
+## Requirements and installation
+
+Python 3.10 or newer and `openpyxl==3.1.5`. Neither R nor EvoEF2 is required to run the Python scripts. Internet access is needed to install missing dependencies; the workflow itself has no network calls.
+
+Extract the repository, open a terminal in its top-level folder, and run:
+
+```{bash, eval=FALSE}
+python -m pip install -r requirements.txt
+python check_environment.py
+```
+
+On Windows, use `py` in place of `python` if that is how Python is installed. An isolated virtual environment is recommended; run the installation and scripts with the same interpreter.
+
+The checker runs both scripts on tiny artificial data in a temporary directory. It verifies exact output sequences, Excel handoff, mutation highlighting, pool summaries, and global peptide deduplication. It leaves user data untouched and removes its temporary files. A successful check tests this small path in your environment, not the correctness of your own scientific inputs.
+
+Optional package installation gives the `variant-peptides` command:
+
+```{bash, eval=FALSE}
+python -m pip install -e .
+variant-peptides --help
+```
+
+## Run the bundled example
+
+Run the following commands from the repository root. Output directories must not exist yet; choose new directory names when repeating a run.
+
+```{bash, eval=FALSE}
+python mutant_builder.py --sequence examples/reference.fasta --variants examples/variants.txt --chain A --output results/example_mutants
+```
+
+```{bash, eval=FALSE}
+python peptide_pool_generator.py --sequence examples/reference.fasta --mutants results/example_mutants/mutant_sequences.xlsx --windows examples/windows.csv --chain A --output results/example_pools
+```
+
+You may substitute `mutant_sequences.csv` for the Excel input. Both handoffs are checked against the reference and mutation strings.
+
+Expected example results:
+
+* Four variants, including one unchanged `WT` record.
+* Four window rows under the default selection rule.
+* Two distinct changed peptides in the synthesis catalog: `AADEF` and `FGHIA`.
+* Two variants reported as `NO_AFFECTED_WINDOWS` in the pool summary.
+
+The example reference is an alphabetical arrangement of the 20 standard amino acids. It is not a biological protein or a proposed experimental sequence.
+
+## Use your own data
+
+Create an `inputs/` directory and keep your input files there. Run:
+
+```{bash, eval=FALSE}
+python mutant_builder.py --sequence inputs/reference.fasta --variants inputs/variants.txt --chain A --output results/my_mutants
+```
+
+```{bash, eval=FALSE}
+python peptide_pool_generator.py --sequence inputs/reference.fasta --mutants results/my_mutants/mutant_sequences.csv --windows inputs/windows.csv --chain A --output results/my_pools
+```
+
+Paths are relative to your terminal's current directory, not the script location. Quote any path that contains spaces. The equivalent combined entry points are `python variant_peptide_tools.py mutants ...` and `python variant_peptide_tools.py pools ...`.
+
+### Reference sequence
+
+Supply exactly one FASTA record or a plain-text protein sequence. Whitespace and lowercase letters are normalized. Only the 20 standard amino acids are accepted. Multiple FASTA records, empty sequences, stop symbols, ambiguous letters, and nonstandard residues are rejected. The sequence length is limited to 32,767 characters for Excel compatibility.
+
+### Variant list
+
+A plain-text file contains one variant per nonblank line:
+
+```text
+# Artificial examples matching examples/reference.fasta
+CA2A;
+CA2A,KA9A;
+WT;
+```
+
+`CA2A` means change C at residue number 2 on chain A to A. Commas separate substitutions within a variant; a terminal semicolon is accepted but optional. Blank lines and comments starting with `#` are ignored. `WT` explicitly represents the unchanged reference.
+
+Chain IDs are case-sensitive single letters or digits. Every mutation must match the selected `--chain`; this workflow processes one chain per run. The tool rejects wrong reference residues, out-of-range positions, duplicate positions within a variant, malformed tokens, and substitutions that do not change an amino acid. Repeated variant lines remain separate records with separate IDs. IDs are assigned in input-record order as `VAR001`, `VAR002`, and so on.
+
+There is no six-mutation limit. If needed, set a deliberate cap:
+
+```{bash, eval=FALSE}
+python mutant_builder.py --sequence inputs/reference.fasta --variants inputs/variants.txt --max-mutations 6 --output results/capped_mutants
+```
+
+### Residue numbering
+
+By default, token residue number 1 means the first amino acid of the supplied sequence. The program does not read PDB files or infer structure-to-sequence numbering.
+
+For a contiguous numbering shift, use `--position-offset` on **both** commands:
+
+```text
+sequence_position = mutation_number - position_offset
+```
+
+For example, with `--position-offset 100`, token number 102 refers to sequence position 2. Windows always use one-based sequence coordinates, regardless of this option. Numbering gaps, insertion codes, indels, multi-chain variants, and general residue maps are unsupported. Map such mutation coordinates to your reference before using this program; a constant offset is not sufficient for arbitrary PDB numbering.
+
+### Window definitions
+
+Supply comma-separated CSV with these columns:
+
+| Column | Required | Meaning |
+| --- | --- | --- |
+| `core_id` | Yes | User-defined group label, nonempty and not `NONE` |
+| `window` | Yes | Positive window identifier, unique within its group |
+| `window_len` | Yes | Number of amino acids in `native_window` |
+| `native_window` | Yes | Unmodified peptide exactly matching the reference |
+| `start` | No | One-based sequence start; use it to disambiguate repeated sequences |
+| `core_seq` | No | Optional annotation retained in window reports; not used to select windows |
+
+```csv
+core_id,core_seq,window,window_len,native_window,start
+Group1,CDE,1,5,ACDEF,1
+Group1,CDE,2,5,FGHIK,5
+Group2,MNP,1,5,LMNPQ,10
+```
+
+When `start` is omitted or blank, the native window must occur exactly once in the reference. Overlapping repeated occurrences count as repeats. With an explicit start, the window must match the reference at that exact position. End coordinates are inclusive.
+
+`core_seq` is an annotation for the group, not a requirement that each window contain the entire core. If supplied, its amino-acid characters must be valid and nonblank annotations for a group must agree. Biological relevance of groups and windows is determined by the user.
+
+Every window must validate. Invalid rows stop the run rather than silently producing incomplete pools.
+
+## Pool-selection rules
+
+Default: `--selection affected-core`.
+
+If a mutation lies inside any window of a group, **all windows in that group** appear in that variant's pool table. This preserves group-level selection even when a neighboring window remains unchanged. Each row is marked `CHANGED` or `UNCHANGED`.
+
+For only windows that directly contain a mutation, use:
+
+```{bash, eval=FALSE}
+python peptide_pool_generator.py --sequence inputs/reference.fasta --mutants results/my_mutants/mutant_sequences.csv --windows inputs/windows.csv --selection changed-windows --output results/changed_windows_only
+```
+
+A variant with no mutations in any defined window still appears in the pool summary as `NO_AFFECTED_WINDOWS`; it has no peptide-window rows. `WT` consequently does not create a pool automatically. Native windows are exported separately so users can plan reference controls explicitly.
+
+## What each output means
+
+### Variant output directory
+
+* `mutant_sequences.xlsx`: validated variants, red changed residues, and run metadata.
+* `mutant_sequences.csv`: the same records as plain data.
+* `mutant_sequences.fasta`: full-length sequences with variant IDs and mutation strings.
+* `manifest.json`: input filenames and SHA-256 checksums, software versions, and numbering settings.
+
+### Pool output directory
+
+* `peptide_pools.xlsx`: peptide rows, pool summary, native windows, synthesis catalog, and run metadata.
+* `peptide_pools.csv`: one row per selected variant/window combination, including start/end, mutation profile, status, and catalog peptide ID.
+* `pool_summary.csv`: one row for every input variant, including variants without affected windows.
+* `native_windows.csv`: all supplied windows, their coordinates, and annotations.
+* `synthesis_catalog.csv`: one row per distinct **changed** peptide sequence across all variants and windows.
+* `manifest.json`: input checksums and run settings.
+
+The catalog deduplicates globally by amino-acid sequence. It retains variant and window provenance; the same catalog ID can occur in many pool rows. Unchanged rows have no catalog ID. The catalog does not automatically include native controls, modification chemistry, quantities, purity requirements, or aliquoting instructions. Deduplication assumes chemically identical unmodified sequences; different terminal modifications or labels require separate ordering decisions.
+
+Counts distinguish selected window rows, changed window rows, and unique changed sequences. A pool can have multiple window rows pointing to one physical peptide. Catalog IDs are deterministic for a given set of sequences but can change if that set changes. Variant IDs likewise depend on input order; retain each run's inputs and outputs together.
+
+Excel cells containing user labels are stored as text. CSV files preserve raw labels; import them as text if using a spreadsheet application that automatically interprets formulas.
+
+## Validation and error handling
+
+All variants are checked before output creation. Any invalid variant stops the run. The pool generator independently rebuilds each mutant from the reference and mutation string and compares it against the supplied sequence; an `OK` flag alone is insufficient.
+
+The pool generator also accepts the earlier builder's five-column Excel layout with headers at row 4 and data from row 5. Invalid rows and altered sequences are rejected rather than skipped. CSV generated by this repository is the simplest portable handoff. A different workbook layout requires conversion, not a guessed column match.
+
+Exit status `0` means the operation completed, including cases where no windows were affected. Status `2` indicates invalid input, command-line usage, or a handled file/dependency error. Unexpected failures may return another nonzero status. If a disk or file-writing failure leaves a partial directory, inspect it and choose a fresh output directory for the next run.
+
+Existing output directories are never overwritten. Keep the input files: checksums identify the exact bytes used but do not replace backups or establish biological validity.
+
+## Tests and reproducibility
+
+```{bash, eval=FALSE}
+python check_environment.py
+python -m unittest discover -s tests -v
+```
+
+Tests use only artificial sequences and temporary files. They check substitutions against independently constructed expected sequences, malformed inputs, chain and numbering rules, repeated windows, pool selection, global deduplication, Excel/CSV round trips, and overwrite protection.
+
+The included GitHub Actions workflow is configured for Windows and Ubuntu with Python 3.10 and 3.12. Those hosted runs happen after upload; see `VALIDATION.md` for checks actually executed while preparing this release.
+
+## R Markdown documentation
+
+`README.Rmd` contains this guide in R Markdown form. It is documentation, not an R implementation of the pipeline. All command chunks use `eval=FALSE` so knitting the guide does not execute Python or process user data.
+
+With R, RStudio, and the `rmarkdown` package installed, open the file and choose Knit, or run in R:
+
+```{r, eval=FALSE}
+rmarkdown::render("README.Rmd", output_format = "html_document")
+```
+
+To regenerate the GitHub README after editing the guide:
+
+```{r, eval=FALSE}
+rmarkdown::render("README.Rmd", output_format = "github_document")
+```
+
+## Repository contents and sharing
+
+The `.gitignore` excludes local input and output directories, common sequence/data files, workbooks, environments, and caches. Only the named synthetic example data are allowlisted. Ignore rules do not remove files already tracked by Git. Review `git status` and staged changes before committing your own work.
+
+The original uploaded files and private research data are not part of this repository. Generic program logic is necessarily included because it implements the workflow. No project-specific sequences, selected mutations, targets, results, personal paths, or vendor information are included.
+
+No license has been selected for this code. Add your chosen license before offering it under open-source reuse terms.
+
+## Reference
+
+EvoEF2 mutation-file notation is documented in the [official EvoEF2 repository](https://github.com/tommyhuangthu/EvoEF2#4-buildmutant). EvoEF2 is a separate project and is not bundled or invoked here. Its notation identifies the wild-type residue, chain, residue number, and substituted residue; each mutation combination can end in a semicolon.
